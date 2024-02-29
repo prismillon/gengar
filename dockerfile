@@ -7,7 +7,7 @@ COPY src/*.rs ./src/.
 RUN touch -a -m ./src/main.rs
 RUN cargo build --release
 
-FROM alpine
+FROM debian
 WORKDIR /app
 COPY --from=builder /app/target/release/gengar /app/gengar
 CMD "/app/gengar"

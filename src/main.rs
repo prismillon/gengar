@@ -60,15 +60,6 @@ async fn event_handler(
                 || new_message.content.contains("https://www.tiktok.com/")
                 || new_message.content.contains("https://vm.tiktok.com/")
             {
-                let mut edited_msg = new_message.clone();
-                match edited_msg
-                    .edit(&ctx, EditMessage::new().suppress_embeds(true))
-                    .await
-                {
-                    Ok(_) => (),
-                    Err(e) => println!("{}", e),
-                }
-
                 let message_items: Vec<&str> = new_message.content.split(" ").collect();
                 let mut links = "".to_owned();
                 for item in message_items {
@@ -107,7 +98,17 @@ async fn event_handler(
                 if let Err(why) = link_msg {
                     println!("Error sending message: {why:?}");
                 }
+
+                let mut edited_msg = new_message.clone();
+                match edited_msg
+                    .edit(&ctx, EditMessage::new().suppress_embeds(true))
+                    .await
+                {
+                    Ok(_) => (),
+                    Err(e) => println!("{}", e),
+                }
             }
+
             if new_message.author.id == 1035968772412014592 {
                 let create_embeds: Vec<CreateEmbed> = new_message
                     .embeds

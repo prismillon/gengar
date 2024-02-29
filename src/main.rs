@@ -80,7 +80,7 @@ async fn event_handler(
                                     .as_str(),
                             );
                         }
-                        i if i.starts_with("https://www.tiktok.com/") => {
+                        i if i.starts_with("https://vm.tiktok.com/") => {
                             links.push_str(
                                 format!("[O]({})", i.replace("vm.tiktok.com", "vm.vxtiktok.com"))
                                     .as_str(),

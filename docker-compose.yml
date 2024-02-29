@@ -1,6 +1,8 @@
-version: '3.8'
+version: "3.8"
 services:
   gengar:
     container_name: gengar
-    image: gengar 
+    env_file:
+      - .env
+    image: gengar
     restart: unless-stopped

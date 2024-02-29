@@ -1,8 +1,13 @@
-FROM python:3.11-slim-bullseye
-RUN apt update && apt install git -y
+FROM rust:latest AS builder
+RUN cargo new --bin app
 WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-CMD [ "python3", "/app/gengar.py" ]
+COPY Cargo.* ./
+RUN cargo build --release
+COPY src/*.rs ./src/.
+RUN touch -a -m ./src/main.rs
+RUN cargo build --release
+
+FROM alpine
+WORKDIR /app
+COPY --from=builder /app/target/release/gengar /app/gengar
+CMD "/app/gengar"

@@ -60,7 +60,7 @@ async fn event_handler(
                 || new_message.content.contains("https://www.tiktok.com/")
                 || new_message.content.contains("https://vm.tiktok.com/")
             {
-                let message_items: Vec<&str> = new_message.content.split(" ").collect();
+                let message_items: Vec<&str> = new_message.content.split(&[' ', '\n']).collect();
                 let mut links = "".to_owned();
                 for item in message_items {
                     match item {

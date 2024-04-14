@@ -1,13 +1,11 @@
 use poise::serenity_prelude::{
-    self as serenity, ChannelId, CreateEmbed, CreateMessage, EditMessage,
+    self as serenity, ChannelId, CreateEmbed, CreateMessage, CreateWebhook, ExecuteWebhook,
 };
 use std::env::var;
 use std::sync::atomic::AtomicU32;
 
-// Types used by all command functions
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-// Custom user data passed to all command functions
 pub struct Data {
     _poise_mentions: AtomicU32,
 }
@@ -60,52 +58,62 @@ async fn event_handler(
                 || new_message.content.contains("https://www.tiktok.com/")
                 || new_message.content.contains("https://vm.tiktok.com/")
             {
-                let message_items: Vec<&str> = new_message.content.split(&[' ', '\n']).collect();
-                let mut links = "".to_owned();
-                for item in message_items {
-                    match item {
-                        i if i.starts_with("https://twitter.com/") => {
-                            links.push_str(
-                                format!("[O]({})", i.replace("twitter", "fxtwitter")).as_str(),
-                            );
-                        }
-                        i if i.starts_with("https://x.com/") => {
-                            links.push_str(
-                                format!("[O]({})", i.replace("x.com", "fixupx.com")).as_str(),
-                            );
-                        }
-                        i if i.starts_with("https://www.tiktok.com/") => {
-                            links.push_str(
-                                format!("[O]({})", i.replace("www.tiktok.com", "www.vxtiktok.com"))
-                                    .as_str(),
-                            );
-                        }
-                        i if i.starts_with("https://vm.tiktok.com/") => {
-                            links.push_str(
-                                format!("[O]({})", i.replace("vm.tiktok.com", "vm.vxtiktok.com"))
-                                    .as_str(),
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-                let builder = CreateMessage::new().content(links);
-                let link_msg = new_message
-                    .channel_id
-                    .send_message(&ctx.http, builder)
-                    .await;
+                let msg = new_message
+                    .content
+                    .replace("https://twitter.com/", "https://fxtwitter.com/")
+                    .replace("https://x.com/", "https://fixupx.com/")
+                    .replace("https://www.tiktok.com/", "https://www.vxtiktok.com/")
+                    .replace("https://vm.tiktok.com/", "https://www.vxtiktok.com/");
 
-                if let Err(why) = link_msg {
-                    println!("Error sending message: {why:?}");
-                }
-
-                let mut edited_msg = new_message.clone();
-                match edited_msg
-                    .edit(&ctx, EditMessage::new().suppress_embeds(true))
+                let member = match new_message
+                    .guild_id
+                    .unwrap()
+                    .member(&ctx.http, new_message.author.id)
                     .await
                 {
-                    Ok(_) => (),
-                    Err(e) => println!("{}", e),
+                    Ok(member) => member,
+                    Err(why) => {
+                        println!("Error getting member: {why:?}");
+                        return Ok(());
+                    }
+                };
+
+                let name = member.display_name();
+                let avatar = member.user.avatar_url().unwrap_or_default();
+
+                let webhook = CreateWebhook::new("gengar");
+                let webhook = new_message
+                    .channel_id
+                    .create_webhook(&ctx.http, webhook)
+                    .await;
+
+                let webhook = match webhook {
+                    Ok(webhook) => webhook,
+                    Err(why) => {
+                        println!("Error creating webhook: {why:?}");
+                        return Ok(());
+                    }
+                };
+
+                let builder = ExecuteWebhook::new()
+                    .content(msg)
+                    .username(name)
+                    .avatar_url(avatar);
+
+                let delete_msg = new_message.delete(&ctx).await;
+                if let Err(why) = delete_msg {
+                    println!("Error deleting message: {why:?}");
+                }
+
+                let post_webhook = webhook.execute(&ctx.http, false, builder).await;
+
+                if let Err(why) = post_webhook {
+                    println!("Error posting webhook: {why:?}");
+                }
+
+                let delete_webhook = webhook.delete(&ctx.http).await;
+                if let Err(why) = delete_webhook {
+                    println!("Error deleting webhook: {why:?}");
                 }
             }
 

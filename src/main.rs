@@ -61,7 +61,7 @@ async fn event_handler(
                 let msg = new_message
                     .content
                     .replace("https://twitter.com/", "https://fxtwitter.com/")
-                    .replace("https://x.com/", "https://fixupx.com/")
+                    .replace("https://x.com/", "https://fxtwitter.com/")
                     .replace("https://www.tiktok.com/", "https://vm.dstn.to/")
                     .replace("https://vm.tiktok.com/", "https://vm.dstn.to/");
 
@@ -81,17 +81,33 @@ async fn event_handler(
                 let name = member.display_name();
                 let avatar = member.user.avatar_url().unwrap_or_default();
 
-                let webhook = CreateWebhook::new("gengar");
-                let webhook = new_message
-                    .channel_id
-                    .create_webhook(&ctx.http, webhook)
-                    .await;
+                let webhooks = match new_message.channel_id.webhooks(&ctx.http).await {
+                    Ok(webhooks) => webhooks,
+                    Err(why) => {
+                        println!("Error getting webhooks: {why:?}");
+                        return Ok(());
+                    }
+                };
+
+                let webhook = webhooks
+                    .iter()
+                    .find(|webhook| webhook.name == Some("gengar".to_owned()));
 
                 let webhook = match webhook {
-                    Ok(webhook) => webhook,
-                    Err(why) => {
-                        println!("Error creating webhook: {why:?}");
-                        return Ok(());
+                    Some(webhook) => webhook.to_owned(),
+                    None => {
+                        let webhook = CreateWebhook::new("gengar");
+                        match new_message
+                            .channel_id
+                            .create_webhook(&ctx.http, webhook)
+                            .await
+                        {
+                            Ok(webhook) => webhook,
+                            Err(why) => {
+                                println!("Error creating webhook: {why:?}");
+                                return Ok(());
+                            }
+                        }
                     }
                 };
 
@@ -109,11 +125,6 @@ async fn event_handler(
 
                 if let Err(why) = post_webhook {
                     println!("Error posting webhook: {why:?}");
-                }
-
-                let delete_webhook = webhook.delete(&ctx.http).await;
-                if let Err(why) = delete_webhook {
-                    println!("Error deleting webhook: {why:?}");
                 }
             }
 

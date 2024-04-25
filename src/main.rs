@@ -116,15 +116,14 @@ async fn event_handler(
                     .username(name)
                     .avatar_url(avatar);
 
+                let post_webhook = webhook.execute(&ctx.http, false, builder).await;
+                if let Err(why) = post_webhook {
+                    println!("Error posting webhook: {why:?}");
+                }
+
                 let delete_msg = new_message.delete(&ctx).await;
                 if let Err(why) = delete_msg {
                     println!("Error deleting message: {why:?}");
-                }
-
-                let post_webhook = webhook.execute(&ctx.http, false, builder).await;
-
-                if let Err(why) = post_webhook {
-                    println!("Error posting webhook: {why:?}");
                 }
             }
 

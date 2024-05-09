@@ -7,7 +7,7 @@ COPY src/*.rs ./src/.
 RUN touch -a -m ./src/main.rs
 RUN cargo build --release --bins --target x86_64-unknown-linux-gnu
 
-FROM debian:stretch-slim
+FROM debian:stable-slim
 USER 1000
 COPY --from=builder /app/target/x86_64-unknown-linux-gnu/release/gengar /gengar
 CMD ["./gengar"]

@@ -1,7 +1,3 @@
-config.py
-__pycache__
-.env
-
 # Added by cargo
 
 /target

@@ -60,8 +60,8 @@ async fn event_handler(
             {
                 let msg = new_message
                     .content
-                    .replace("https://twitter.com/", "https://fxtwitter.com/")
-                    .replace("https://x.com/", "https://fxtwitter.com/")
+                    .replace("https://twitter.com/", "https://fixvx.com/")
+                    .replace("https://x.com/", "https://fixvx.com/")
                     .replace("https://www.tiktok.com/", "https://vm.dstn.to/")
                     .replace("https://vm.tiktok.com/", "https://vm.dstn.to/");
 

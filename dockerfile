@@ -8,5 +8,5 @@ RUN touch -a -m ./src/main.rs
 RUN cargo build --release --bins --target x86_64-unknown-linux-gnu
 
 FROM gcr.io/distroless/static-debian12
-COPY --from=builder /app/target/x86_64-unknown-linux-gnu/release/gengar /gengar
+COPY --from=builder /app/target/x86_64-unknown-linux-gnu/release/gengar /
 CMD ["/gengar"]

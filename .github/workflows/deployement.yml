@@ -31,7 +31,7 @@ jobs:
         with:
           push: true
           context: .
-          tags: ${{ vars.REGISTRY_URL }}/library/gengar:latest
+          tags: ${{ vars.REGISTRY_URL }}/app/gengar:latest
           cache-from: type=gha
           cache-to: type=gha
 

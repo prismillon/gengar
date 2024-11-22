@@ -62,8 +62,8 @@ async fn event_handler(
                     .content
                     .replace("https://twitter.com/", "https://fixvx.com/")
                     .replace("https://x.com/", "https://fixvx.com/")
-                    .replace("https://www.tiktok.com/", "https://vm.dstn.to/")
-                    .replace("https://vm.tiktok.com/", "https://vm.dstn.to/");
+                    .replace("https://www.tiktok.com/", "https://tnktok.com/")
+                    .replace("https://vm.tiktok.com/", "https://tnktok.com/");
 
                 let member = match new_message
                     .guild_id

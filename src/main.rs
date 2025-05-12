@@ -53,79 +53,77 @@ async fn event_handler(
             println!("Logged in as {}", data_about_bot.user.name);
         }
         serenity::FullEvent::Message { new_message } => {
-            // if new_message.content.contains("https://twitter.com/")
-            //     || new_message.content.contains("https://x.com/")
-            //     || new_message.content.contains("https://www.tiktok.com/")
-            //     || new_message.content.contains("https://vm.tiktok.com/")
-            // {
-            //     let msg = new_message
-            //         .content
-            //         .replace("https://twitter.com/", "https://fixvx.com/")
-            //         .replace("https://x.com/", "https://fixvx.com/")
-            //         .replace("https://www.tiktok.com/", "https://tnktok.com/")
-            //         .replace("https://vm.tiktok.com/", "https://tnktok.com/");
+            if new_message.content.contains("https://twitter.com/")
+                && new_message.content.contains("status")
+                || new_message.content.contains("https://x.com/")
+                    && new_message.content.contains("status")
+            {
+                let msg = new_message
+                    .content
+                    .replace("https://twitter.com/", "https://fixvx.com/")
+                    .replace("https://x.com/", "https://fixvx.com/");
 
-            //     let member = match new_message
-            //         .guild_id
-            //         .unwrap()
-            //         .member(&ctx.http, new_message.author.id)
-            //         .await
-            //     {
-            //         Ok(member) => member,
-            //         Err(why) => {
-            //             println!("Error getting member: {why:?}");
-            //             return Ok(());
-            //         }
-            //     };
+                let member = match new_message
+                    .guild_id
+                    .unwrap()
+                    .member(&ctx.http, new_message.author.id)
+                    .await
+                {
+                    Ok(member) => member,
+                    Err(why) => {
+                        println!("Error getting member: {why:?}");
+                        return Ok(());
+                    }
+                };
 
-            //     let name = member.display_name();
-            //     let avatar = member.user.avatar_url().unwrap_or_default();
+                let name = member.display_name();
+                let avatar = member.user.avatar_url().unwrap_or_default();
 
-            //     let webhooks = match new_message.channel_id.webhooks(&ctx.http).await {
-            //         Ok(webhooks) => webhooks,
-            //         Err(why) => {
-            //             println!("Error getting webhooks: {why:?}");
-            //             return Ok(());
-            //         }
-            //     };
+                let webhooks = match new_message.channel_id.webhooks(&ctx.http).await {
+                    Ok(webhooks) => webhooks,
+                    Err(why) => {
+                        println!("Error getting webhooks: {why:?}");
+                        return Ok(());
+                    }
+                };
 
-            //     let webhook = webhooks
-            //         .iter()
-            //         .find(|webhook| webhook.name == Some("gengar".to_owned()));
+                let webhook = webhooks
+                    .iter()
+                    .find(|webhook| webhook.name == Some("gengar".to_owned()));
 
-            //     let webhook = match webhook {
-            //         Some(webhook) => webhook.to_owned(),
-            //         None => {
-            //             let webhook = CreateWebhook::new("gengar");
-            //             match new_message
-            //                 .channel_id
-            //                 .create_webhook(&ctx.http, webhook)
-            //                 .await
-            //             {
-            //                 Ok(webhook) => webhook,
-            //                 Err(why) => {
-            //                     println!("Error creating webhook: {why:?}");
-            //                     return Ok(());
-            //                 }
-            //             }
-            //         }
-            //     };
+                let webhook = match webhook {
+                    Some(webhook) => webhook.to_owned(),
+                    None => {
+                        let webhook = CreateWebhook::new("gengar");
+                        match new_message
+                            .channel_id
+                            .create_webhook(&ctx.http, webhook)
+                            .await
+                        {
+                            Ok(webhook) => webhook,
+                            Err(why) => {
+                                println!("Error creating webhook: {why:?}");
+                                return Ok(());
+                            }
+                        }
+                    }
+                };
 
-            //     let builder = ExecuteWebhook::new()
-            //         .content(msg)
-            //         .username(name)
-            //         .avatar_url(avatar);
+                let builder = ExecuteWebhook::new()
+                    .content(msg)
+                    .username(name)
+                    .avatar_url(avatar);
 
-            //     let post_webhook = webhook.execute(&ctx.http, false, builder).await;
-            //     if let Err(why) = post_webhook {
-            //         println!("Error posting webhook: {why:?}");
-            //     }
+                let post_webhook = webhook.execute(&ctx.http, false, builder).await;
+                if let Err(why) = post_webhook {
+                    println!("Error posting webhook: {why:?}");
+                }
 
-            //     let delete_msg = new_message.delete(&ctx).await;
-            //     if let Err(why) = delete_msg {
-            //         println!("Error deleting message: {why:?}");
-            //     }
-            // }
+                let delete_msg = new_message.delete(&ctx).await;
+                if let Err(why) = delete_msg {
+                    println!("Error deleting message: {why:?}");
+                }
+            }
 
             if new_message.author.id == 1035968772412014592 {
                 let create_embeds: Vec<CreateEmbed> = new_message

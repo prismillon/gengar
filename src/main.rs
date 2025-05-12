@@ -55,11 +55,14 @@ async fn event_handler(
         serenity::FullEvent::Message { new_message } => {
             if new_message.content.contains("https://twitter.com/")
                 || new_message.content.contains("https://x.com/")
+                || new_message.content.contains("https://www.instagram.com")
+                || new_message.content.contains("https://instagram.com")
             {
                 let msg = new_message
                     .content
                     .replace("https://twitter.com/", "https://fixvx.com/")
-                    .replace("https://x.com/", "https://fixvx.com/");
+                    .replace("https://x.com/", "https://fixvx.com/")
+                    .replace("instagram.com", "ddinstagram.com");
 
                 let member = match new_message
                     .guild_id

@@ -54,9 +54,7 @@ async fn event_handler(
         }
         serenity::FullEvent::Message { new_message } => {
             if new_message.content.contains("https://twitter.com/")
-                && new_message.content.contains("status")
                 || new_message.content.contains("https://x.com/")
-                    && new_message.content.contains("status")
             {
                 let msg = new_message
                     .content

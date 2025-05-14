@@ -78,10 +78,7 @@ async fn event_handler(
                 };
 
                 let name = member.display_name();
-                let avatar = match member.avatar_url() {
-                    Some(url) if !url.is_empty() => url,
-                    _ => member.user.avatar_url().unwrap_or_default(),
-                };
+                let avatar = member.face();
 
                 let webhooks = match new_message.channel_id.webhooks(&ctx.http).await {
                     Ok(webhooks) => webhooks,

@@ -60,8 +60,8 @@ async fn event_handler(
             {
                 let msg = new_message
                     .content
-                    .replace("https://twitter.com/", "https://fixvx.com/")
-                    .replace("https://x.com/", "https://fixvx.com/")
+                    .replace("https://twitter.com/", "https://twittpr.com/")
+                    .replace("https://x.com/", "https://twittpr.com/")
                     .replace("instagram.com", "vxinstagram.com");
 
                 let member = match new_message

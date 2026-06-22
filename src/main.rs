@@ -1,13 +1,76 @@
 use poise::serenity_prelude::{
-    self as serenity, ChannelId, CreateEmbed, CreateMessage, CreateWebhook, ExecuteWebhook,
+    self as serenity, ChannelType, ChannelId, CreateEmbed, CreateMessage, EditMessage,
+    GetMessages, GuildId, MessageId, UserId,
 };
+use std::collections::HashMap;
 use std::env::var;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
+/// How long we keep watching an original message for edits/deletes after
+/// posting our reply.
+const TRACK_DURATION: Duration = Duration::from_secs(60 * 60 * 24);
+
+type Tracked = Arc<Mutex<HashMap<MessageId, MessageId>>>;
+
 pub struct Data {
-    _poise_mentions: AtomicU32,
+    /// Maps an original (author) message id to the id of the reply we posted
+    /// for it, so we can update or delete that reply if the author later edits
+    /// or removes their message. Entries are dropped after `TRACK_DURATION`.
+    tracked: Tracked,
+    /// Guards the one-time startup crawl against repeated `Ready` events.
+    loaded: AtomicBool,
+}
+
+/// Current unix time in seconds.
+fn now_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+/// Record an original→reply pairing and schedule its removal once the
+/// original is older than `TRACK_DURATION`. `created_unix` is the original
+/// message's creation time.
+fn track(tracked: &Tracked, original: MessageId, reply: MessageId, created_unix: i64) {
+    tracked.lock().unwrap().insert(original, reply);
+
+    let remaining = created_unix + TRACK_DURATION.as_secs() as i64 - now_unix();
+    if remaining <= 0 {
+        return;
+    }
+    let tracked = tracked.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(remaining as u64)).await;
+        tracked.lock().unwrap().remove(&original);
+    });
+}
+
+/// Extract the matching links from `content`, strip their tracking query
+/// string, rewrite them to an embed-friendly host, and render each as small
+/// subtext (`-# `).
+fn rewrite_links(content: &str) -> Vec<String> {
+    content
+        .split_whitespace()
+        .filter(|word| {
+            word.starts_with("https://twitter.com/")
+                || word.starts_with("https://x.com/")
+                || word.starts_with("https://www.instagram.com")
+                || word.starts_with("https://instagram.com")
+        })
+        .map(|word| {
+            let url = word.split('?').next().unwrap_or(word);
+            let url = url
+                .replace("https://twitter.com/", "https://twittpr.com/")
+                .replace("https://x.com/", "https://twittpr.com/")
+                .replace("instagram.com", "vxinstagram.com");
+            format!("-# {url}")
+        })
+        .collect()
 }
 
 #[tokio::main]
@@ -23,7 +86,8 @@ async fn main() {
         .setup(move |_ctx, _ready, _framework| {
             Box::pin(async move {
                 Ok(Data {
-                    _poise_mentions: AtomicU32::new(0),
+                    tracked: Arc::new(Mutex::new(HashMap::new())),
+                    loaded: AtomicBool::new(false),
                 })
             })
         })
@@ -42,87 +106,147 @@ async fn main() {
     client.unwrap().start().await.unwrap();
 }
 
+/// Scan recent history in every visible text channel and rebuild the tracking
+/// table. Our replies carry no reply-reference, so each original is paired with
+/// the earliest later bot message whose content matches `rewrite_links(...)`.
+async fn load_tracked(
+    ctx: &serenity::Context,
+    tracked: &Tracked,
+    bot_id: UserId,
+    guild_ids: Vec<GuildId>,
+) {
+    let cutoff = now_unix() - TRACK_DURATION.as_secs() as i64;
+    let mut restored = 0u32;
+
+    for guild_id in guild_ids {
+        let channels = match guild_id.channels(&ctx.http).await {
+            Ok(channels) => channels,
+            Err(_) => continue,
+        };
+
+        for channel in channels.values() {
+            if channel.kind != ChannelType::Text {
+                continue;
+            }
+
+            // Page back through history until we cross the cutoff.
+            let mut messages: Vec<serenity::Message> = Vec::new();
+            let mut before: Option<MessageId> = None;
+            loop {
+                let mut builder = GetMessages::new().limit(100);
+                if let Some(before) = before {
+                    builder = builder.before(before);
+                }
+                let batch = match channel.id.messages(&ctx.http, builder).await {
+                    Ok(batch) => batch,
+                    Err(_) => break,
+                };
+                let Some(oldest) = batch.last() else {
+                    break;
+                };
+                let reached_cutoff = oldest.timestamp.unix_timestamp() < cutoff;
+                before = Some(oldest.id);
+                messages.extend(
+                    batch
+                        .into_iter()
+                        .filter(|m| m.timestamp.unix_timestamp() >= cutoff),
+                );
+                if reached_cutoff {
+                    break;
+                }
+            }
+
+            // Pair originals with their replies in chronological order.
+            messages.sort_by_key(|m| m.id);
+            let mut claimed = vec![false; messages.len()];
+            for i in 0..messages.len() {
+                if messages[i].author.id == bot_id {
+                    continue;
+                }
+                let links = rewrite_links(&messages[i].content);
+                if links.is_empty() {
+                    continue;
+                }
+                let expected = links.join("\n");
+                for j in (i + 1)..messages.len() {
+                    if claimed[j] || messages[j].author.id != bot_id {
+                        continue;
+                    }
+                    if messages[j].content == expected {
+                        claimed[j] = true;
+                        track(
+                            tracked,
+                            messages[i].id,
+                            messages[j].id,
+                            messages[i].timestamp.unix_timestamp(),
+                        );
+                        restored += 1;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    println!("Restored {restored} tracked message(s) from history");
+}
+
 async fn event_handler(
     ctx: &serenity::Context,
     event: &serenity::FullEvent,
     _framework: poise::FrameworkContext<'_, Data, Error>,
-    _data: &Data,
+    data: &Data,
 ) -> Result<(), Error> {
     match event {
         serenity::FullEvent::Ready { data_about_bot, .. } => {
             println!("Logged in as {}", data_about_bot.user.name);
+
+            // Rebuild the tracking table from the last `TRACK_DURATION` of
+            // history so edits/deletes still work after a restart. Run once.
+            if !data.loaded.swap(true, Ordering::SeqCst) {
+                let ctx = ctx.clone();
+                let tracked = data.tracked.clone();
+                let bot_id = data_about_bot.user.id;
+                let guild_ids: Vec<GuildId> =
+                    data_about_bot.guilds.iter().map(|g| g.id).collect();
+                tokio::spawn(async move {
+                    load_tracked(&ctx, &tracked, bot_id, guild_ids).await;
+                });
+            }
         }
         serenity::FullEvent::Message { new_message } => {
-            if new_message.content.contains("https://twitter.com/")
-                || new_message.content.contains("https://x.com/")
-                || new_message.content.contains("https://www.instagram.com")
-                || new_message.content.contains("https://instagram.com")
-            {
-                let msg = new_message
-                    .content
-                    .replace("https://twitter.com/", "https://twittpr.com/")
-                    .replace("https://x.com/", "https://twittpr.com/")
-                    .replace("instagram.com", "vxinstagram.com");
+            let links = rewrite_links(&new_message.content);
+            if !links.is_empty() {
+                let msg = links.join("\n");
 
-                let member = match new_message
-                    .guild_id
-                    .unwrap()
-                    .member(&ctx.http, new_message.author.id)
-                    .await
-                {
-                    Ok(member) => member,
-                    Err(why) => {
-                        println!("Error getting member: {why:?}");
-                        return Ok(());
-                    }
-                };
-
-                let name = member.display_name();
-                let avatar = member.face();
-
-                let webhooks = match new_message.channel_id.webhooks(&ctx.http).await {
-                    Ok(webhooks) => webhooks,
-                    Err(why) => {
-                        println!("Error getting webhooks: {why:?}");
-                        return Ok(());
-                    }
-                };
-
-                let webhook = webhooks
-                    .iter()
-                    .find(|webhook| webhook.name == Some("gengar".to_owned()));
-
-                let webhook = match webhook {
-                    Some(webhook) => webhook.to_owned(),
-                    None => {
-                        let webhook = CreateWebhook::new("gengar");
-                        match new_message
-                            .channel_id
-                            .create_webhook(&ctx.http, webhook)
-                            .await
-                        {
-                            Ok(webhook) => webhook,
-                            Err(why) => {
-                                println!("Error creating webhook: {why:?}");
-                                return Ok(());
-                            }
-                        }
-                    }
-                };
-
-                let builder = ExecuteWebhook::new()
-                    .content(msg)
-                    .username(name)
-                    .avatar_url(avatar);
-
-                let post_webhook = webhook.execute(&ctx.http, false, builder).await;
-                if let Err(why) = post_webhook {
-                    println!("Error posting webhook: {why:?}");
+                // Keep the user's original message, but hide the embed Discord
+                // generates for the original (broken) links.
+                let suppress = new_message
+                    .channel_id
+                    .edit_message(
+                        &ctx.http,
+                        new_message.id,
+                        EditMessage::new().suppress_embeds(true),
+                    )
+                    .await;
+                if let Err(why) = suppress {
+                    println!("Error suppressing embeds: {why:?}");
                 }
 
-                let delete_msg = new_message.delete(&ctx).await;
-                if let Err(why) = delete_msg {
-                    println!("Error deleting message: {why:?}");
+                // Post the rewritten links so Discord unfurls the fixed embed.
+                let builder = CreateMessage::new().content(msg);
+                match new_message.channel_id.send_message(&ctx.http, builder).await {
+                    Ok(reply) => {
+                        // Track the original so we can mirror later edits/deletes,
+                        // then forget it after TRACK_DURATION.
+                        track(
+                            &data.tracked,
+                            new_message.id,
+                            reply.id,
+                            new_message.timestamp.unix_timestamp(),
+                        );
+                    }
+                    Err(why) => println!("Error posting replacement embed: {why:?}"),
                 }
             }
 
@@ -139,6 +263,69 @@ async fn event_handler(
                 let transfer_msg = channel_id.send_message(&ctx.http, builder).await;
                 if let Err(why) = transfer_msg {
                     println!("Error sending transfer message: {why:?}");
+                }
+            }
+        }
+        serenity::FullEvent::MessageUpdate { event, .. } => {
+            // Only react to genuine content edits of a message we're tracking.
+            // (Embed-generation updates and our own flag edits carry no content.)
+            let Some(content) = &event.content else {
+                return Ok(());
+            };
+            let reply_id = match data.tracked.lock().unwrap().get(&event.id) {
+                Some(reply_id) => *reply_id,
+                None => return Ok(()),
+            };
+
+            let links = rewrite_links(content);
+            if links.is_empty() {
+                // The author removed or changed the link to something we don't
+                // handle: delete our reply and restore the original's embeds.
+                if let Err(why) = event.channel_id.delete_message(&ctx.http, reply_id).await {
+                    println!("Error deleting stale reply: {why:?}");
+                }
+                let _ = event
+                    .channel_id
+                    .edit_message(
+                        &ctx.http,
+                        event.id,
+                        EditMessage::new().suppress_embeds(false),
+                    )
+                    .await;
+                data.tracked.lock().unwrap().remove(&event.id);
+            } else {
+                // The link changed: re-suppress the new embed on the original
+                // and refresh our reply.
+                let _ = event
+                    .channel_id
+                    .edit_message(
+                        &ctx.http,
+                        event.id,
+                        EditMessage::new().suppress_embeds(true),
+                    )
+                    .await;
+                if let Err(why) = event
+                    .channel_id
+                    .edit_message(
+                        &ctx.http,
+                        reply_id,
+                        EditMessage::new().content(links.join("\n")),
+                    )
+                    .await
+                {
+                    println!("Error updating reply: {why:?}");
+                }
+            }
+        }
+        serenity::FullEvent::MessageDelete {
+            channel_id,
+            deleted_message_id,
+            ..
+        } => {
+            let reply_id = data.tracked.lock().unwrap().remove(deleted_message_id);
+            if let Some(reply_id) = reply_id {
+                if let Err(why) = channel_id.delete_message(&ctx.http, reply_id).await {
+                    println!("Error deleting reply for removed message: {why:?}");
                 }
             }
         }

@@ -14,12 +14,23 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 /// posting our reply.
 const TRACK_DURATION: Duration = Duration::from_secs(60 * 60 * 24);
 
-type Tracked = Arc<Mutex<HashMap<MessageId, MessageId>>>;
+/// What we remember about an original message: the id of the reply we posted,
+/// and the original's content the last time we acted on it. The content lets us
+/// ignore the redundant `MessageUpdate` events Discord emits for our own
+/// embed-suppression edits and for late embed unfurls — without it those echoes
+/// would re-edit the reply in a feedback loop.
+#[derive(Clone)]
+struct TrackedReply {
+    reply: MessageId,
+    content: String,
+}
+
+type Tracked = Arc<Mutex<HashMap<MessageId, TrackedReply>>>;
 
 pub struct Data {
-    /// Maps an original (author) message id to the id of the reply we posted
-    /// for it, so we can update or delete that reply if the author later edits
-    /// or removes their message. Entries are dropped after `TRACK_DURATION`.
+    /// Maps an original (author) message id to the reply we posted for it, so we
+    /// can update or delete that reply if the author later edits or removes
+    /// their message. Entries are dropped after `TRACK_DURATION`.
     tracked: Tracked,
     /// Guards the one-time startup crawl against repeated `Ready` events.
     loaded: AtomicBool,
@@ -36,8 +47,17 @@ fn now_unix() -> i64 {
 /// Record an original→reply pairing and schedule its removal once the
 /// original is older than `TRACK_DURATION`. `created_unix` is the original
 /// message's creation time.
-fn track(tracked: &Tracked, original: MessageId, reply: MessageId, created_unix: i64) {
-    tracked.lock().unwrap().insert(original, reply);
+fn track(
+    tracked: &Tracked,
+    original: MessageId,
+    reply: MessageId,
+    content: String,
+    created_unix: i64,
+) {
+    tracked
+        .lock()
+        .unwrap()
+        .insert(original, TrackedReply { reply, content });
 
     let remaining = created_unix + TRACK_DURATION.as_secs() as i64 - now_unix();
     if remaining <= 0 {
@@ -178,6 +198,7 @@ async fn load_tracked(
                             tracked,
                             messages[i].id,
                             messages[j].id,
+                            messages[i].content.clone(),
                             messages[i].timestamp.unix_timestamp(),
                         );
                         restored += 1;
@@ -243,6 +264,7 @@ async fn event_handler(
                             &data.tracked,
                             new_message.id,
                             reply.id,
+                            new_message.content.clone(),
                             new_message.timestamp.unix_timestamp(),
                         );
                     }
@@ -268,13 +290,24 @@ async fn event_handler(
         }
         serenity::FullEvent::MessageUpdate { event, .. } => {
             // Only react to genuine content edits of a message we're tracking.
-            // (Embed-generation updates and our own flag edits carry no content.)
             let Some(content) = &event.content else {
                 return Ok(());
             };
-            let reply_id = match data.tracked.lock().unwrap().get(&event.id) {
-                Some(reply_id) => *reply_id,
-                None => return Ok(()),
+            // Look up the reply and bail unless the content actually changed.
+            // Discord re-sends `MessageUpdate` (with content) for our own
+            // suppress edits and for late embed unfurls; acting on those echoes
+            // would re-edit the reply in a loop. Record the new content so the
+            // follow-up echoes are recognised as no-ops.
+            let reply_id = {
+                let mut tracked = data.tracked.lock().unwrap();
+                let Some(entry) = tracked.get_mut(&event.id) else {
+                    return Ok(());
+                };
+                if &entry.content == content {
+                    return Ok(());
+                }
+                entry.content = content.clone();
+                entry.reply
             };
 
             let links = rewrite_links(content);
@@ -322,9 +355,9 @@ async fn event_handler(
             deleted_message_id,
             ..
         } => {
-            let reply_id = data.tracked.lock().unwrap().remove(deleted_message_id);
-            if let Some(reply_id) = reply_id {
-                if let Err(why) = channel_id.delete_message(&ctx.http, reply_id).await {
+            let entry = data.tracked.lock().unwrap().remove(deleted_message_id);
+            if let Some(entry) = entry {
+                if let Err(why) = channel_id.delete_message(&ctx.http, entry.reply).await {
                     println!("Error deleting reply for removed message: {why:?}");
                 }
             }

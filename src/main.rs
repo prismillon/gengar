@@ -73,25 +73,24 @@ fn track(
 /// Extract the matching links from `content`, strip their tracking query
 /// string, rewrite them to an embed-friendly host, and render each as small
 /// subtext (`-# `).
+///
+/// Instagram is deliberately NOT handled. Every embed-fixer host for it either
+/// died or got quota-blocked (vxinstagram, then our own px.prr.sh instance,
+/// plus xnstagram/kkinstagram/ddinstagram before them), and the scrapes were
+/// far slower than Discord's unfurl window. Instagram links are therefore left
+/// untouched: no reply is posted, and no `suppress_embeds` edit is made, so
+/// Discord's own handling of the original message applies.
 fn rewrite_links(content: &str) -> Vec<String> {
     content
         .split_whitespace()
         .filter(|word| {
-            word.starts_with("https://twitter.com/")
-                || word.starts_with("https://x.com/")
-                || word.starts_with("https://www.instagram.com")
-                || word.starts_with("https://instagram.com")
+            word.starts_with("https://twitter.com/") || word.starts_with("https://x.com/")
         })
         .map(|word| {
             let url = word.split('?').next().unwrap_or(word);
             let url = url
                 .replace("https://twitter.com/", "https://twittpr.com/")
-                .replace("https://x.com/", "https://twittpr.com/")
-                // Anchor on the full host (not the "instagram.com" substring):
-                // replacing the substring would turn www.instagram.com into
-                // www.px.prr.sh, which resolves to nothing.
-                .replace("https://www.instagram.com/", "https://px.prr.sh/")
-                .replace("https://instagram.com/", "https://px.prr.sh/");
+                .replace("https://x.com/", "https://twittpr.com/");
             format!("-# {url}")
         })
         .collect()
@@ -367,4 +366,44 @@ async fn event_handler(
         _ => {}
     }
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::rewrite_links;
+
+    /// Removing instagram support is the point: instagram links must produce
+    /// nothing at all, so no reply is posted and no suppress_embeds edit happens.
+    #[test]
+    fn instagram_links_are_ignored() {
+        for c in [
+            "https://www.instagram.com/reel/Dd0-i6JCI24/?stkn=ZGJ3dG16bHIzb2Ju",
+            "https://www.instagram.com/reel/Dd0-i6JCI24/",
+            "https://instagram.com/p/DS2TElYDKko/",
+            "https://www.instagram.com/p/DS2TElYDKko/?utm_source=ig_web_copy_link",
+        ] {
+            assert!(rewrite_links(c).is_empty(), "{c} must not be rewritten");
+        }
+    }
+
+    /// An instagram link in a message that also carries a twitter link must not
+    /// drag the twitter rewrite along with it.
+    #[test]
+    fn instagram_is_skipped_but_other_links_survive() {
+        let out = rewrite_links(
+            "look https://www.instagram.com/reel/Dd0-i6JCI24/ and https://x.com/u/status/1?s=2",
+        );
+        assert_eq!(out, vec!["-# https://twittpr.com/u/status/1".to_string()]);
+    }
+
+    #[test]
+    fn twitter_and_x_still_rewrite_and_strip_tracking() {
+        assert_eq!(
+            rewrite_links("https://twitter.com/u/status/1"),
+            vec!["-# https://twittpr.com/u/status/1".to_string()]
+        );
+        assert_eq!(
+            rewrite_links("https://x.com/u/status/1697379755027288549?t=2UA9"),
+            vec!["-# https://twittpr.com/u/status/1697379755027288549".to_string()]
+        );
+    }
 }

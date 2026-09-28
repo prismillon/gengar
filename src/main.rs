@@ -87,7 +87,11 @@ fn rewrite_links(content: &str) -> Vec<String> {
             let url = url
                 .replace("https://twitter.com/", "https://twittpr.com/")
                 .replace("https://x.com/", "https://twittpr.com/")
-                .replace("instagram.com", "xnstagram.com");
+                // Anchor on the full host (not the "instagram.com" substring):
+                // replacing the substring would turn www.instagram.com into
+                // www.px.prr.sh, which resolves to nothing.
+                .replace("https://www.instagram.com/", "https://px.prr.sh/")
+                .replace("https://instagram.com/", "https://px.prr.sh/");
             format!("-# {url}")
         })
         .collect()

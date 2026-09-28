@@ -87,7 +87,7 @@ fn rewrite_links(content: &str) -> Vec<String> {
             let url = url
                 .replace("https://twitter.com/", "https://twittpr.com/")
                 .replace("https://x.com/", "https://twittpr.com/")
-                .replace("instagram.com", "vxinstagram.com");
+                .replace("instagram.com", "xnstagram.com");
             format!("-# {url}")
         })
         .collect()
